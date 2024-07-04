@@ -28,6 +28,15 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
+/* List of processes in THREAD_SLEEP state, that is, processes
+that are sleep. - Part1_Alarm*/
+static struct list sleep_list;
+
+/* Global tick will save the time to scan the sleep list.
+Same with minimum vale of local tich of the threads.
+- Part1_Alarm */
+static int64_t global_tick;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -79,6 +88,20 @@ static tid_t allocate_tid (void);
 // setup temporal gdt first.
 static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
 
+/* Update Global tick.
+- Par1_Alarm */
+void
+update_global_tick_to_awake(int64_t ticks){
+	global_tick = (global_tick < ticks) ? global_tick : ticks;
+}
+
+/* Get Global tick.
+- Part1_Alarm */
+int64_t
+get_global_tick (void){
+	return global_tick;
+}
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -92,6 +115,7 @@ static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
 
    It is not safe to call thread_current() until this function
    finishes. */
+
 void
 thread_init (void) {
 	ASSERT (intr_get_level () == INTR_OFF);
@@ -108,6 +132,7 @@ thread_init (void) {
 	/* Init the globla thread context */
 	lock_init (&tid_lock);
 	list_init (&ready_list);
+	list_init (&sleep_list);
 	list_init (&destruction_req);
 
 	/* Set up a thread structure for the running thread. */
@@ -308,6 +333,57 @@ thread_yield (void) {
 	intr_set_level (old_level);
 }
 
+/* Insert Threads into list in order by ticks.
+The order will be descending.
+- Part1_Alarm */
+bool 
+cmp_ticks (const struct list_elem *a, const struct list_elem *b, void *aux){
+	struct thread *thread_a = list_entry(a, struct thread, elem);
+	struct thread *thread_b = list_entry(b, struct thread, elem);
+
+	return (thread_a->wakeup_tick < thread_b->wakeup_tick) ? true : false;
+}
+
+/* Insert Thread into sleep queue. 
+- Part1_Alarm */
+void
+thread_sleep (int64_t ticks){
+	struct thread *curr = thread_current ();
+	enum intr_level old_level;
+
+	old_level = intr_disable ();
+
+	ASSERT (curr != idle_thread);
+
+	update_global_tick_to_awake (curr->wakeup_tick = ticks);
+
+	list_insert_ordered (&sleep_list, &curr->elem, cmp_ticks, NULL);
+	thread_block ();
+	intr_set_level (old_level);
+}
+
+/* Insert Thread into ready queue.
+- Part1_Alarm */
+void
+thread_wake (int64_t ticks){
+	struct list_elem *elem;
+
+	global_tick = INT64_MAX;
+
+	elem = list_begin (&sleep_list);
+	while(elem != list_end(&sleep_list)){
+		struct thread *t = list_entry (elem, struct thread, elem);
+
+		if (ticks >= t->wakeup_tick) {
+			elem = list_remove (&t->elem);
+			thread_unblock (t);
+		} else {
+			elem = list_next(elem);
+			update_global_tick_to_awake (t->wakeup_tick);
+			break;
+		}
+	}
+}
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
