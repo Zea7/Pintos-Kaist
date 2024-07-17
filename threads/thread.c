@@ -232,6 +232,9 @@ thread_create (const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock (t);
 
+	if (thread_get_priority () < priority)
+		thread_yield ();
+
 	return tid;
 }
 
@@ -265,7 +268,7 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+	list_insert_ordered (&ready_list, &t->elem, cmp_priority, NULL);
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
@@ -317,6 +320,18 @@ thread_exit (void) {
 	NOT_REACHED ();
 }
 
+/* Insert Threads into list in order by priority.
+The order will be  descending.
+- Part1_Priority Scheduling*/
+bool
+cmp_priority (const struct list_elem *a, const struct list_elem *b, void *aux) {
+	struct thread *thread_a = list_entry (a, struct thread, elem);
+	struct thread *thread_b = list_entry (b, struct thread, elem);
+
+	return (thread_a->priority > thread_b->priority) ? true : false;
+}
+
+
 /* Yields the CPU.  The current thread is not put to sleep and
    may be scheduled again immediately at the scheduler's whim. */
 void
@@ -328,13 +343,13 @@ thread_yield (void) {
 
 	old_level = intr_disable ();
 	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
+		list_insert_ordered (&ready_list, &curr->elem, cmp_priority, NULL);
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
 
 /* Insert Threads into list in order by ticks.
-The order will be descending.
+The order will be ascending.
 - Part1_Alarm */
 bool 
 cmp_ticks (const struct list_elem *a, const struct list_elem *b, void *aux){
@@ -384,10 +399,20 @@ thread_wake (int64_t ticks){
 		}
 	}
 }
+
+void
+thread_re_yield (void) {
+	if(!list_empty (&ready_list) && 
+	thread_current()->priority < list_entry (list_front (&ready_list), struct thread, elem)->priority)
+		thread_yield ();
+}
+
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+	thread_current ()->init_priority = new_priority;
+	sort_donations ();
+	thread_re_yield ();
 }
 
 /* Returns the current thread's priority. */
@@ -485,6 +510,10 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+
+	t->init_priority = priority;
+	t->wait_on_lock = NULL;
+	list_init (&t->donations);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -649,6 +678,44 @@ schedule (void) {
 		/* Before switching the thread, we first save the information
 		 * of current running. */
 		thread_launch (next);
+	}
+}
+
+/* Definition of cmp_donate_priority.
+- Part1_Priority_Scheduling */
+bool
+cmp_donate_priority (const struct list_elem *a, const struct list_elem *b, void *aux) {
+	int priority_a = list_entry (a, struct thread, d_elem)->priority;
+	int priority_b = list_entry (b, struct thread, d_elem)->priority;
+
+	return (priority_a > priority_b) ? true : false;
+}
+
+/* Do Priority Donation.
+- Part1_Priority_Scheduling */
+void
+do_priority_donation (void) {
+	struct thread *curr = thread_current ();
+	int depth = 0;
+	while (curr->wait_on_lock && depth < DEPTH_LIMIT) {
+		struct thread *holder = curr->wait_on_lock->holder;
+		if (holder->priority >= curr->priority) return;
+		holder->priority = curr->priority;
+		curr = holder;
+	}
+}
+
+/* Reset current thread's priority and sort Donation list.
+- Part1_Priority Scheduling */
+void
+sort_donations (void) {
+	struct thread *curr = thread_current ();
+	curr->priority = curr->init_priority;
+
+	if (!list_empty (&curr->donations)) {
+		list_sort (&curr->donations, cmp_donate_priority, NULL);
+		int biggest_priority = list_entry (list_front (&curr->donations), struct thread, d_elem)->priority;
+		curr->priority = biggest_priority > curr->init_priority ? biggest_priority : curr->init_priority;
 	}
 }
 

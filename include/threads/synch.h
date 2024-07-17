@@ -16,6 +16,11 @@ bool sema_try_down (struct semaphore *);
 void sema_up (struct semaphore *);
 void sema_self_test (void);
 
+/* Compare function for list_insert_ordered.
+Using semaphore's waiters. 
+- Part1_Priority Scheduling*/
+bool cmp_semaelem (const struct list_elem *a, const struct list_elem *b, void *aux);
+
 /* Lock. */
 struct lock {
 	struct thread *holder;      /* Thread holding lock (for debugging). */
@@ -27,6 +32,10 @@ void lock_acquire (struct lock *);
 bool lock_try_acquire (struct lock *);
 void lock_release (struct lock *);
 bool lock_held_by_current_thread (const struct lock *);
+
+/* Remove lock when lock released, change holders' donation list.
+- Part1_Priority Scheduling */
+void remove_lock_with_donation (struct lock *);
 
 /* Condition variable. */
 struct condition {

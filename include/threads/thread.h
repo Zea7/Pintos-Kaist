@@ -27,7 +27,7 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
-
+#define DEPTH_LIMIT 10
 /* A kernel thread or user process.
  *
  * Each thread structure is stored in its own 4 kB page.  The
@@ -91,10 +91,17 @@ struct thread {
 	enum thread_status status;          /* Thread state. */
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
-	int64_t wakeup_tick;
+	int init_priority;
+	int64_t wakeup_tick;				/* Sleep Tick. - Part1_Alarm*/
 
+	/* Variables using for Priority Donation. 
+	- Part1_Priority Scheduling */
+	struct lock *wait_on_lock;
+	struct list donations;
+	struct list_elem d_elem;
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
+
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -108,6 +115,8 @@ struct thread {
 	/* Owned by thread.c. */
 	struct intr_frame tf;               /* Information for switching */
 	unsigned magic;                     /* Detects stack overflow. */
+
+
 };
 
 /* If false (default), use round-robin scheduler.
@@ -148,5 +157,28 @@ void do_iret (struct intr_frame *tf);
 /* Use for alarm
 - Part1_Alarm */
 bool cmp_ticks (const struct list_elem *a, const struct list_elem *b, void *aux);
+
+/* Use for priority
+- Part1_Priority Scheduling */
+bool cmp_priority (const struct list_elem *a, const struct list_elem *b, void *aux);
+
+/* Compare function for list_insert_ordered.
+Usiung Thread's priority.
+Different from cmp_priority : Use d_elem for list_elem in list_entry ().
+- Part1_Priority Scheduling */
+bool cmp_donate_priority (const struct list_elem *a, const struct list_elem *b, void *aux);
+
+
+/* If thread's priority has been changed, re-yield the thread has biggest priority after changes.
+- Part1_Priority Scheduling */
+void thread_re_yield (void);
+
+/* Do Priority Donation.
+- Part1_Priority Scheduling */
+void do_priority_donation (void);
+
+/* Sort Donatoins List.
+- Part1_Priority Scheduling */
+void sort_donations (void);
 
 #endif /* threads/thread.h */
